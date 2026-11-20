@@ -48,16 +48,7 @@ def beat_engine_name() -> str:
     return "Beat This! (AI)" if _get_beat_model() is not None else "librosa (rezervni)"
 
 
-def _track_beats(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
-    model = _get_beat_model()
-    if model is not None:
-        beats, downbeats = model(y, sr)
-        return np.asarray(beats, float), np.asarray(downbeats, float)
-    return _fallback_beats(y, sr)
-
-
-def _fallback_beats(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
-    """Constant-tempo grid estimator (precise period via long-lag autocorrelation + phase folding)."""
+def _onset_feats(y: np.ndarray, sr: int) -> dict:
     hop = 128
     fps = sr / hop
     S = np.abs(librosa.stft(y, n_fft=1024, hop_length=hop))
@@ -66,106 +57,129 @@ def _fallback_beats(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
     flux = np.maximum(0, np.diff(logS, axis=1, prepend=logS[:, :1]))
     onset = flux.sum(0)
     low_on = flux[freqs < 150].sum(0)
-    onset = onset - np.convolve(onset, np.ones(64) / 64, mode="same")
-    onset = np.maximum(onset, 0)
+    onset = np.maximum(onset - np.convolve(onset, np.ones(64) / 64, mode="same"), 0)
     n = len(onset)
     f = np.fft.rfft(onset, 2 * n)
     ac = np.fft.irfft(f * np.conj(f))[:n]
     ac /= ac[0] + 1e-9
+    return {"fps": fps, "S": S, "logS": logS, "onset": onset, "low_on": low_on, "ac": ac, "n": n, "sr": sr}
 
-    def acv(lag):
+
+def _ac_score(F, T, N=32):
+    ac, n, fps = F["ac"], F["n"], F["fps"]
+    tot = 0.0
+    for k in range(1, N + 1):
+        lag = k * T * fps
         i = int(lag)
         if i + 1 >= n:
-            return 0.0
+            break
         fr = lag - i
-        return ac[i] * (1 - fr) + ac[i + 1] * fr
+        tot += ac[i] * (1 - fr) + ac[i + 1] * fr
+    return tot / N
 
-    def score(T, N=32):
-        return sum(acv(k * T * fps) for k in range(1, N + 1)) / N
 
-    cands = np.arange(70.0, 180.0, 0.25)
-    sc = np.array([score(60 / b, 8) for b in cands])
-    prior = np.exp(-0.5 * (np.log2(cands / 120.0) / 0.9) ** 2)
-    b0 = cands[int(np.argmax(sc * (0.6 + 0.4 * prior)))]
-    fine = np.arange(b0 - 0.5, b0 + 0.5, 0.005)
-    N = int(min(256, max(16, (n / fps) / (60 / b0) * 0.5)))
-    bpm = fine[int(np.argmax([score(60 / b, N) for b in fine]))]
-    T = 60.0 / bpm
-    # phase: fold onset envelope modulo T
+def _refine_bpm(F, bpm0: float, width: float = 0.015) -> float:
+    """Sub-0.01 BPM precision via long-lag autocorrelation around an estimate."""
+    N = int(min(256, max(16, (F["n"] / F["fps"]) / (60 / bpm0) * 0.5)))
+    fine = np.arange(bpm0 * (1 - width), bpm0 * (1 + width), 0.005)
+    return float(fine[int(np.argmax([_ac_score(F, 60 / b, N) for b in fine]))])
+
+
+def _phase(F, T, weights=None) -> float:
+    """Beat phase (seconds, 0..T) by folding onsets; kicks (low band) weigh most."""
+    fps, n = F["fps"], F["n"]
     t = np.arange(n) / fps
     bins = 200
-    ph = np.floor((t % T) / T * bins).astype(int)
-    low_n = low_on / (low_on.max() + 1e-9)
-    on_n = onset / (onset.max() + 1e-9)
-    hist = np.bincount(ph, weights=2.0 * low_n + on_n, minlength=bins)  # kicks define the beat
-    hist = np.convolve(np.r_[hist, hist[:4]], np.ones(5) / 5, mode="valid")[:bins]
-    t0 = (np.argmax(hist) + 2) / bins * T % T
-    beats = np.arange(t0, n / fps, T)
-    # downbeat phase: sections and chords change on downbeats -> look for energy/chroma jumps
+    ph = np.floor((t % T) / T * bins).astype(int) % bins
+    w = 2.0 * F["low_on"] / (F["low_on"].max() + 1e-9) + F["onset"] / (F["onset"].max() + 1e-9)
+    hist = np.bincount(ph, weights=w, minlength=bins)
+    hist = np.convolve(np.r_[hist[-2:], hist, hist[:2]], np.ones(5) / 5, mode="valid")[:bins]
+    # +14 ms: STFT flux peaks slightly before the transient onset (measured on test material)
+    return float((np.argmax(hist) / bins * T + 0.014) % T)
+
+
+def _downbeat_phase(F, beats: np.ndarray, model_downbeats: np.ndarray | None, T: float) -> int:
+    """Which of every 4 beats is the downbeat: model votes + section/chord changes + kick weight."""
+    fps, n = F["fps"], F["n"]
     fr = np.minimum((beats * fps).astype(int), n - 1)
+    logS = F["logS"]
     energy_b = np.array([logS[:, a:b].mean() if b > a else 0 for a, b in zip(fr[:-1], fr[1:])])
-    chroma = librosa.feature.chroma_stft(S=S ** 2, sr=sr)
+    chroma = librosa.feature.chroma_stft(S=F["S"] ** 2, sr=F["sr"])
     chroma_b = np.array([chroma[:, a:b].mean(1) if b > a else np.zeros(12) for a, b in zip(fr[:-1], fr[1:])])
     jump = np.r_[0, np.abs(np.diff(energy_b))]
-    cjump = np.r_[0, np.linalg.norm(np.diff(chroma_b, axis=0), axis=1)]
+    cjump = np.r_[0, np.linalg.norm(np.diff(chroma_b, axis=0), axis=1)] if len(chroma_b) > 1 else np.zeros(1)
     jump = jump / (jump.max() + 1e-9) + cjump / (cjump.max() + 1e-9)
-    lowb = low_on[fr[:-1]] / (low_on.max() + 1e-9)
-    scores = [jump[p::4].sum() + 0.3 * lowb[p::4].mean() for p in range(4)]
-    p = int(np.argmax(scores))
-    return beats, beats[p::4]
+    lowb = F["low_on"][fr[:-1]] / (F["low_on"].max() + 1e-9)
+    scores = np.array([jump[p::4].sum() + 0.3 * lowb[p::4].mean() for p in range(4)])
+    scores = scores / (scores.max() + 1e-9)
+    if model_downbeats is not None and len(model_downbeats):
+        k = np.round((model_downbeats - beats[0]) / T).astype(int)
+        votes = np.bincount(np.mod(k, 4), minlength=4).astype(float)
+        votes = votes / (votes.sum() + 1e-9)
+        if votes.max() > 0.45:  # model is confident about the bar phase
+            scores = scores + 2.0 * votes
+    return int(np.argmax(scores))
 
 
-def _fit_grid(beats: np.ndarray, downbeats: np.ndarray, dur: float) -> dict:
-    """Fit a constant grid if the track is steady, otherwise keep a dynamic grid."""
-    if len(beats) < 8:
-        bpm = 120.0
-        return {"type": "constant", "bpm": bpm, "first_downbeat": 0.0, "beats": [], "downbeats": []}
-    ibi = np.diff(beats)
-    med = np.median(ibi)
-    good = np.abs(ibi - med) < 0.25 * med
-    # robust linear fit beat_index -> time
-    idx = np.concatenate([[0], np.cumsum(np.round(ibi / med))]).astype(float)
-    mask = np.concatenate([[True], good])
-    for _ in range(3):
-        A = np.vstack([idx[mask], np.ones(mask.sum())]).T
-        (T, t0), *_ = np.linalg.lstsq(A, beats[mask], rcond=None)
-        resid = beats - (idx * T + t0)
-        mask = np.abs(resid) < 0.03
-        if mask.sum() < 8:
-            mask = np.abs(resid) < 0.06
-    bpm = 60.0 / T
-    # tidy bpm: snap near-integers
-    if abs(bpm - round(bpm)) < 0.04:
-        bpm = float(round(bpm))
-        T = 60.0 / bpm
-        # refit offset with fixed T
-        t0 = float(np.median(beats[mask] - idx[mask] * T))
-    steady = np.mean(np.abs(beats - (idx * T + t0)) < 0.035) > 0.85
-    # downbeat phase
-    if len(downbeats):
-        k = np.round((downbeats - t0) / T).astype(int)
-        phase = int(np.bincount(np.mod(k, 4), minlength=4).argmax())
+def _track_beats(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Returns (beats, downbeats, info). Constant tempo is refined to sub-millisecond precision."""
+    F = _onset_feats(y, sr)
+    model = _get_beat_model()
+    mb = md = None
+    if model is not None:
+        mb, md = model(y, sr)
+        mb, md = np.asarray(mb, float), np.asarray(md, float)
+    if mb is not None and len(mb) > 16:
+        ibi = np.diff(mb)
+        good = ibi[(ibi > 0.25) & (ibi < 1.5)]
+        bpm0 = 60.0 / float(np.mean(good[np.abs(good - np.median(good)) < 0.1 * np.median(good)]))
+        bpm = _refine_bpm(F, bpm0, 0.02)
     else:
-        phase = 0
-    first = t0 + phase * T
+        cands = np.arange(70.0, 180.0, 0.25)
+        sc = np.array([_ac_score(F, 60 / b, 8) for b in cands])
+        prior = np.exp(-0.5 * (np.log2(cands / 120.0) / 0.9) ** 2)
+        bpm = _refine_bpm(F, float(cands[int(np.argmax(sc * (0.6 + 0.4 * prior)))]), 0.005)
+    T = 60.0 / bpm
+    t0 = _phase(F, T)
+    dur = F["n"] / F["fps"]
+    beats = np.arange(t0, dur, T)
+    steady = True
+    if mb is not None and len(mb) > 16:
+        # constant tempo? local tempo (median of 16 beat intervals) must stay within +-1.5%.
+        # (phase slips of the model in sparse intros don't change local tempo, real drift does)
+        loc = np.array([(mb[i + 16] - mb[i]) / 16 for i in range(0, max(1, len(mb) - 16), 4)])
+        loc = loc[(loc > 0.6 * T) & (loc < 1.6 * T)]
+        steady = len(loc) == 0 or float(np.mean(np.abs(loc - T) / T < 0.015)) > 0.8
+    p = _downbeat_phase(F, beats, md, T)
+    info = {"steady": bool(steady), "bpm": bpm}
+    if not steady:
+        return mb, md, {**info, "bpm": 60.0 / float(np.median(np.diff(mb)))}
+    return beats, beats[p::4], info
+
+
+def _fit_grid(beats: np.ndarray, downbeats: np.ndarray, dur: float, info: dict | None = None) -> dict:
+    """Grid from tracked beats. Constant grids use the refined BPM; dynamic grids keep the beats."""
+    if len(beats) < 8:
+        return {"type": "constant", "bpm": 120.0, "first_downbeat": 0.0, "beats": [], "downbeats": []}
+    info = info or {"steady": True, "bpm": 60.0 / float(np.median(np.diff(beats)))}
+    bpm = info["bpm"]
+    if abs(bpm - round(bpm)) < 0.03:
+        bpm = float(round(bpm))
+    T = 60.0 / bpm
+    first = float(downbeats[0]) if len(downbeats) else float(beats[0])
     while first - 4 * T >= -0.02:
         first -= 4 * T
     while first < -0.02:
         first += 4 * T
-    grid = {
-        "type": "constant" if steady else "dynamic",
-        "bpm": round(float(bpm), 2),
-        "first_downbeat": round(float(first), 4),
-    }
-    if steady:
+    grid = {"type": "constant" if info["steady"] else "dynamic", "bpm": round(float(bpm), 2),
+            "first_downbeat": round(float(first), 4)}
+    if info["steady"]:
         n = int((dur - first) / T) + 1
         grid_beats = first + np.arange(n) * T
     else:
         grid_beats = beats
-        grid["bpm"] = round(float(60.0 / med), 2)
     grid["beats"] = [round(float(b), 4) for b in grid_beats]
-    # downbeats every 4 beats from the first downbeat
-    start = int(np.argmin(np.abs(grid_beats - first)))
+    start = int(np.argmin(np.abs(np.asarray(grid_beats) - first)))
     grid["downbeats"] = [round(float(b), 4) for b in grid_beats[start::4]]
     return grid
 
@@ -351,8 +365,8 @@ def _energy(F: np.ndarray) -> int:
 def analyze(path: str) -> dict:
     y, sr = audio.load(path, sr=SR, mono=True)
     dur = len(y) / sr
-    beats, downbeats = _track_beats(y, sr)
-    grid = _fit_grid(beats, downbeats, dur)
+    beats, downbeats, info = _track_beats(y, sr)
+    grid = _fit_grid(beats, downbeats, dur, info)
     low, mid, high = _band_energies(y, sr)
     dbs = list(grid["downbeats"])
     if not dbs or dbs[-1] < dur:

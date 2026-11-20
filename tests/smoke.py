@@ -2,6 +2,12 @@
 Generates structured test tracks, analyzes them, builds a set, renders a transition and exports rekordbox XML."""
 import os
 import sys
+
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -44,17 +50,21 @@ while (lib.q.qsize() or lib.current is not None) and time.time() - t0 < 900:
 tracks = db.tracks()
 print("beat engine:", lib.status().get("engine"), flush=True)
 expect = {"Night Drive": 126, "Sunrise": 124, "Sunrise (Club Remix)": 127}
+first_db = {"Night Drive": 0.3, "Sunrise": 0.0, "Sunrise (Club Remix)": 0.0}
 for t in tracks:
     check(t["status"] == "ok", f"analiza {t['title']}: {t['status']} {t['error'] or ''}")
     if t["bpm"]:
         check(abs(t["bpm"] - expect[t["title"]]) < 1.0, f"BPM {t['title']} = {t['bpm']} (ocekivano {expect[t['title']]})")
     a = db.track(t["id"])["analysis"] or {}
+    if a:
+        fd = a["grid"]["first_downbeat"]
+        check(abs(fd - first_db[t["title"]]) < 0.03, f"prvi downbeat {t['title']} = {fd:.3f}s (ocekivano {first_db[t['title']]})")
     labels = [p["label"] for p in a.get("phrases", [])]
     check("intro" in labels and "outro" in labels, f"fraze {t['title']}: {labels}")
 
 items = playlist.parse_text("Artist Two - Sunrise\nArtist One - Night Drive\nArtist Two - Sunrise")
 m = playlist.match(items, tracks)
-check(all(x["track_id"] for x in m), "uparivanje tracklistе")
+check(all(x["track_id"] for x in m), "uparivanje tracklist")
 check(m[2]["note"] == "remix" and m[2]["track_id"] != m[0]["track_id"], "duplikat -> remix")
 s = {"name": "Smoke", "items": [{"track_id": x["track_id"], "note": x["note"]} for x in m], "settings": {}}
 full = {t["id"]: db.track(t["id"]) for t in tracks}

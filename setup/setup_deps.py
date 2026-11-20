@@ -4,6 +4,12 @@ import os
 import shutil
 import subprocess
 import sys
+
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent

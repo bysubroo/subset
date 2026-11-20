@@ -11,6 +11,11 @@ if sys.stdout is None:  # pythonw.exe (no console)
     sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def _setup_logging():

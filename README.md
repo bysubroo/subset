@@ -14,7 +14,7 @@ Logovi: `%LOCALAPPDATA%\SubSet\install.log` (instalacija) i `%LOCALAPPDATA%\SubS
 - `python -m subset --browser`: pokreće program iz koda
 - `python tests/smoke.py --repo`: test od početka do kraja
 - `installer/build.sh`: pravi instaler na Linuxu (potreban makensis)
-- Push taga `vX.Y.Z` pokreće GitHub Actions: build na Windowsu, prava silent instalacija, smoke test, test update-a preko postojeće instalacije i objavljivanje u Releases.
+- Svaki push na `main` pokreće GitHub Actions: build na Windowsu, prava silent instalacija, smoke test i test update-a preko postojeće instalacije. Ako sve prođe, objavljuje se Release `v<verzija>` (verzija se čita iz `subset/__init__.py`).
 
 ## Tok rada za artist set
 1. **Biblioteka → + Dodaj folder**: izaberi folder sa masterima. Analiza ide u pozadini, a svaka pesma se analizira samo jednom.

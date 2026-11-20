@@ -1,8 +1,11 @@
 name: Build, test & release (Windows)
 
+# Every push to main builds + tests the installer on real Windows.
+# If it passes, it is published as GitHub Release v<version from subset/__init__.py>.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths-ignore: ["**.md"]
   workflow_dispatch:
 
 permissions:
@@ -87,8 +90,13 @@ jobs:
           path: dist/SubSet-Setup-*.exe
 
       - name: GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VER }}
+          name: SubSet ${{ env.VER }}
+          target_commitish: ${{ github.sha }}
           files: dist/SubSet-Setup-*.exe
-          generate_release_notes: true
+          body: |
+            Skini **SubSet-Setup-${{ env.VER }}.exe** ispod (Assets) i pokreni ga - instalira se preko prethodne verzije.
+            Izmene: vidi CHANGELOG.md.

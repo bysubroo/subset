@@ -269,7 +269,7 @@ function renderSet() {
   $$(".set-head [data-s]").forEach(s => s.onchange = async () => { SET.settings = { ...(SET.settings || {}), [s.dataset.s]: s.value }; await saveSet(); refreshPlan(); });
   $("#btn-hz").onclick = async () => { SET = await api(`/sets/${SET.id}/harmonize`, { body: { mode: $("#hz-mode").value, direction: $("#hz-dir").value } }); toast("Redosled složen po key-u, tempu i energiji."); refreshPlan(); };
   $("#tl-zoom").oninput = e => { tlZoom = +e.target.value; drawTimeline(); };
-  $("#btn-rb").onclick = async () => { try { const r = await api(`/sets/${SET.id}/export/rekordbox`, { body: {} }); toast(`Sačuvano: ${r.path}. U rekordboxu: rekordbox xml → osveži → Import Playlist.`, 9000); } catch (e) { toast(e.message); } };
+  $("#btn-rb").onclick = async () => { try { const r = await api(`/sets/${SET.id}/export/rekordbox`, { body: {} }); toast(`Sačuvano: ${r.m3u8} (lista) i ${r.path} (sa cue-ovima). Najbrže: rekordbox → File → Import → Import Playlist → izaberi .m3u8.`, 12000); api("/open", { body: { path: r.folder } }); } catch (e) { toast(e.message); } };
   $("#btn-mp3").onclick = () => job(`/sets/${SET.id}/render`, { format: "mp3" }, r => { $("#mix-audio").src = "/api/output?path=" + encodeURIComponent(r.path); toast("Miks gotov: " + r.path, 8000); api("/open", { body: { path: r.path } }); });
   $("#btn-wav").onclick = () => job(`/sets/${SET.id}/render`, { format: "wav" }, r => { $("#mix-audio").src = "/api/output?path=" + encodeURIComponent(r.path); toast("Miks gotov: " + r.path, 8000); api("/open", { body: { path: r.path } }); });
   $("#btn-daw").onclick = () => job(`/sets/${SET.id}/export/daw`, {}, r => { toast("DAW fajlovi: " + r.path + " – prevuci sve na takt 1.", 9000); api("/open", { body: { path: r.path } }); });

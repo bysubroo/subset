@@ -63,3 +63,14 @@ def build(set_name: str, tracks: list[dict]) -> bytes:
         ET.SubElement(pl, "TRACK", Key=str(t["id"]))
     ET.indent(root)
     return b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8")
+
+
+def build_m3u8(tracks: list[dict]) -> str:
+    """Plain playlist (order + file paths only, no cues/grid). rekordbox: File > Import > Import Playlist."""
+    lines = ["#EXTM3U"]
+    for t in tracks:
+        a = t.get("analysis") or {}
+        name = " - ".join(x for x in (t.get("artist"), t.get("title")) if x)
+        lines.append(f"#EXTINF:{int(a.get('duration') or -1)},{name}")
+        lines.append(str(pathlib.Path(t["path"]).resolve()))
+    return "\r\n".join(lines) + "\r\n"

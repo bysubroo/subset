@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+- Export u rekordbox pravi i .m3u8 plejlistu (rekordbox: File > Import > Import Playlist); XML ostaje za cue-ove i grid
+- Posle exporta se otvara folder sa fajlovima
+
 ## 0.1.2
 - Beatgrid: Beat This! + precizno doterivanje tempa (autokorelacija) - tacan BPM i bez kvantizacije modela od 20 ms
 - Stabilnost tempa se meri lokalnim tempom, faza grida po kicku (+ korekcija 14 ms)

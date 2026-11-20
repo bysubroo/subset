@@ -348,7 +348,10 @@ def export_rb(sid: int):
     for p in (path, named):
         with open(p, "wb") as f:
             f.write(xml)
-    return {"path": path, "copy": named}
+    m3u = os.path.join(settings["export_dir"], safe_name(s["name"]) + ".m3u8")
+    with open(m3u, "w", encoding="utf-8") as f:
+        f.write(export_rekordbox.build_m3u8(ts))
+    return {"path": path, "copy": named, "m3u8": m3u, "folder": settings["export_dir"]}
 
 
 @app.get("/api/output")

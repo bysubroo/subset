@@ -1,0 +1,16 @@
+numpy
+scipy
+librosa>=0.10
+soundfile>=0.12
+soxr
+fastapi
+uvicorn
+mutagen
+rapidfuzz
+pedalboard>=0.9
+lameenc
+requests
+pywebview>=5
+beat-this>=1.1
+einops
+rotary-embedding-torch

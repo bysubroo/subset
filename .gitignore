@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+dist/
+installer/vendor/
+setup/get-pip.py
+setup/requirements.txt
+.venv/
+*.log

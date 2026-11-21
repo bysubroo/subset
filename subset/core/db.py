@@ -15,6 +15,20 @@ def data_dir() -> Path:
     return d
 
 
+def make_preview(a: dict, n: int = 160) -> dict:
+    """Small 3-band overview (n points) for table rows and lanes."""
+    wf = a.get("waveform") or {}
+    out = {}
+    for band in ("low", "mid", "high"):
+        v = wf.get(band) or []
+        if not v:
+            out[band] = []
+            continue
+        step = len(v) / n
+        out[band] = [max(v[int(i * step):max(int(i * step) + 1, int((i + 1) * step))]) for i in range(n)]
+    return out
+
+
 class DB:
     def __init__(self, path: Path | None = None):
         self.path = path or data_dir() / "library.db"
@@ -38,6 +52,19 @@ class DB:
             CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY);
             """
         )
+        cols = {r[1] for r in self.con.execute("PRAGMA table_info(tracks)")}
+        if "preview" not in cols:
+            self.con.execute("ALTER TABLE tracks ADD COLUMN preview TEXT")
+        self.con.commit()
+        self._backfill_previews()
+
+    def _backfill_previews(self):
+        rows = self.con.execute("SELECT id, analysis FROM tracks WHERE preview IS NULL AND analysis IS NOT NULL").fetchall()
+        for r in rows:
+            try:
+                self.con.execute("UPDATE tracks SET preview=? WHERE id=?", (json.dumps(make_preview(json.loads(r["analysis"]))), r["id"]))
+            except Exception:
+                pass
         self.con.commit()
 
     # ---------------- tracks
@@ -65,8 +92,8 @@ class DB:
     def save_analysis(self, tid: int, a: dict, cues: list):
         with self.lock:
             self.con.execute(
-                "UPDATE tracks SET analysis=?, cues=?, bpm=?, key=?, camelot=?, energy=?, duration=?, status='ok', error=NULL WHERE id=?",
-                (json.dumps(a), json.dumps(cues), a["bpm"], a["key"], a["camelot"], a["energy"], a["duration"], tid))
+                "UPDATE tracks SET analysis=?, cues=?, bpm=?, key=?, camelot=?, energy=?, duration=?, preview=?, status='ok', error=NULL WHERE id=?",
+                (json.dumps(a), json.dumps(cues), a["bpm"], a["key"], a["camelot"], a["energy"], a["duration"], json.dumps(make_preview(a)), tid))
             self.con.commit()
 
     def save_cues(self, tid: int, cues: list):
@@ -82,9 +109,15 @@ class DB:
     def tracks(self) -> list[dict]:
         with self.lock:
             rows = self.con.execute(
-                "SELECT id, path, artist, title, album, duration, bpm, key, camelot, energy, status, error FROM tracks ORDER BY artist, title"
+                "SELECT id, path, artist, title, album, duration, bpm, key, camelot, energy, status, error, preview, cues, added FROM tracks ORDER BY artist, title"
             ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["preview"] = json.loads(d["preview"]) if d["preview"] else None
+            d["cues"] = [c for c in json.loads(d["cues"]) if c.get("type") == "hot"] if d["cues"] else []
+            out.append(d)
+        return out
 
     def track(self, tid: int, full: bool = True) -> dict | None:
         with self.lock:

@@ -3,129 +3,125 @@
 <head>
 <meta charset="utf-8">
 <title>SubSet</title>
-<link rel="stylesheet" href="/web/style.css">
 <link rel="icon" href="/web/favicon.ico">
+<link rel="stylesheet" href="/web/css/tokens.css">
+<link rel="stylesheet" href="/web/css/app.css">
 </head>
 <body>
-<header id="top">
-  <div class="logo">Sub<b>Set</b></div>
-  <nav>
-    <button data-view="library" class="active">Biblioteka</button>
-    <button data-view="sets">Setovi</button>
-    <button data-view="newset">+ Novi set</button>
-    <button data-view="settings">Podešavanja</button>
-  </nav>
-  <div id="status" class="status"></div>
-</header>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h11v3.2H9.4v2.1H17V19H6v-3.2h7.6v-2.1H6z" fill="currentColor"/></svg>
+      <span class="wordmark">Sub<b>Set</b></span>
+      <span class="ver" id="ver"></span>
+    </div>
+    <nav class="seg nav" role="tablist">
+      <button data-view="library" class="on">Biblioteka</button>
+      <button data-view="sets">Setovi</button>
+    </nav>
+    <div class="top-right">
+      <div class="analysis" id="analysis" hidden>
+        <span class="spin"></span><span id="analysis-text"></span>
+        <span class="meter"><i id="analysis-bar"></i></span>
+      </div>
+      <button class="icon-btn" id="btn-settings" title="Podešavanja">
+        <svg viewBox="0 0 20 20"><path d="M10 6.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Zm7 4.1v-1.8l-1.9-.4a5.3 5.3 0 0 0-.6-1.4l1.1-1.6-1.3-1.3-1.6 1.1c-.4-.3-.9-.5-1.4-.6L10.9 3H9.1l-.4 1.9c-.5.1-1 .3-1.4.6L5.7 4.4 4.4 5.7l1.1 1.6c-.3.4-.5.9-.6 1.4L3 9.1v1.8l1.9.4c.1.5.3 1 .6 1.4l-1.1 1.6 1.3 1.3 1.6-1.1c.4.3.9.5 1.4.6l.4 1.9h1.8l.4-1.9c.5-.1 1-.3 1.4-.6l1.6 1.1 1.3-1.3-1.1-1.6c.3-.4.5-.9.6-1.4l1.9-.4Z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+      </button>
+    </div>
+  </header>
 
-<main>
-  <!-- LIBRARY -->
-  <section id="v-library" class="view active">
-    <div class="deck" id="deck">
-      <div class="deck-info">
-        <button id="deck-play" class="round" title="Play / Pauza (Space)">▶</button>
-        <div>
-          <div id="deck-title" class="deck-title">Izaberi pesmu</div>
-          <div id="deck-sub" class="deck-sub"></div>
+  <main>
+    <!-- ================= LIBRARY ================= -->
+    <section class="view on" id="v-library">
+      <div class="deck" id="deck">
+        <div class="deck-meta">
+          <div class="art lg" id="deck-art"></div>
+          <div class="deck-titles">
+            <div class="deck-title" id="deck-title">Izaberi pesmu</div>
+            <div class="deck-artist" id="deck-artist">Klik na red u tabeli učitava pesmu u deck</div>
+            <div class="stats" id="deck-stats"></div>
+          </div>
+          <div class="hotcues" id="deck-cues"></div>
         </div>
-        <div class="deck-stats">
-          <div><span>BPM</span><b id="deck-bpm">-</b></div>
-          <div><span>KEY</span><b id="deck-key">-</b></div>
-          <div><span>ENERGY</span><b id="deck-energy">-</b></div>
-          <div><span>TIME</span><b id="deck-time">-</b></div>
-        </div>
-        <div class="deck-cues" id="deck-cues"></div>
-      </div>
-      <canvas id="deck-wave" height="150"></canvas>
-      <canvas id="deck-overview" height="44"></canvas>
-      <audio id="deck-audio" preload="none"></audio>
-    </div>
-    <div class="toolbar">
-      <button id="btn-add-folder" class="primary">+ Dodaj folder</button>
-      <button id="btn-rescan">Osveži biblioteku</button>
-      <input id="lib-search" placeholder="Pretraga…" />
-      <span class="hint" id="lib-count"></span>
-    </div>
-    <div class="table-wrap">
-      <table id="lib-table" class="grid">
-        <thead><tr>
-          <th data-k="artist">Izvođač</th><th data-k="title">Naziv</th><th data-k="bpm">BPM</th>
-          <th data-k="camelot">Key</th><th data-k="energy">E</th><th data-k="duration">Trajanje</th><th data-k="status">Status</th><th></th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- NEW SET -->
-  <section id="v-newset" class="view">
-    <div class="panel">
-      <h2>Novi set</h2>
-      <div class="row">
-        <label>Naziv seta<input id="ns-name" placeholder="npr. Artist X – Novi Sad 28.11." /></label>
-      </div>
-      <label>Spotify link plejliste <i>ili</i> tracklista (jedna pesma po redu: <code>Izvođač - Naziv | napomena</code>)
-        <textarea id="ns-source" rows="7" placeholder="https://open.spotify.com/playlist/...
-
-ili:
-Artist - Pesma 1
-Artist - Pesma 2 | remix"></textarea>
-      </label>
-      <div class="row">
-        <button id="ns-load" class="primary">Učitaj listu</button>
-        <span class="hint">Pesme koje već postoje u biblioteci se automatski povezuju. Druga pojava iste pesme dobija napomenu „remix" (možeš da promeniš).</span>
-      </div>
-    </div>
-    <div class="panel" id="ns-match" hidden>
-      <div class="row between">
-        <h3 id="ns-summary"></h3>
-        <div>
-          <button id="ns-folder">Izaberi folder sa pesmama koje fale</button>
-          <button id="ns-rematch">Ponovo upari</button>
-          <button id="ns-create" class="primary">Napravi set →</button>
+        <div class="deck-waves">
+          <canvas id="deck-zoom"></canvas>
+          <canvas id="deck-overview"></canvas>
         </div>
       </div>
-      <table class="grid" id="ns-table">
-        <thead><tr><th>#</th><th>Sa liste</th><th>Napomena</th><th>Fajl u biblioteci</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
 
-  <!-- SETS -->
-  <section id="v-sets" class="view">
-    <div class="sets-layout">
-      <aside id="set-list"></aside>
-      <div id="set-main">
-        <div class="empty">Izaberi set levo ili napravi novi.</div>
+      <div class="lib-body">
+        <aside class="side" id="lib-side">
+          <div class="side-group">
+            <div class="side-h">Kolekcija</div>
+            <button class="side-item on" data-src="all"><span>Sve pesme</span><em id="cnt-all">0</em></button>
+            <button class="side-item" data-src="recent"><span>Nedavno dodato</span><em id="cnt-recent">0</em></button>
+            <button class="side-item" data-src="pending"><span>Analiza / greške</span><em id="cnt-pending">0</em></button>
+          </div>
+          <div class="side-group">
+            <div class="side-h">Folderi <button class="mini" id="btn-add-folder" title="Dodaj folder">+</button></div>
+            <div id="folder-list"></div>
+          </div>
+          <div class="side-group filters">
+            <div class="side-h">Filteri <button class="link" id="btn-reset-filters">Resetuj</button></div>
+            <div class="wheel-wrap"><svg id="camelot" viewBox="-110 -110 220 220"></svg></div>
+            <label class="toggle"><input type="checkbox" id="f-compat"><span>Kompatibilno sa učitanom pesmom</span></label>
+            <div class="range-row"><span>BPM</span><input id="f-bpm-min" type="number" placeholder="min"><i>–</i><input id="f-bpm-max" type="number" placeholder="max"></div>
+            <div class="range-row"><span>Energija</span><input id="f-en-min" type="number" min="1" max="10" placeholder="1"><i>–</i><input id="f-en-max" type="number" min="1" max="10" placeholder="10"></div>
+          </div>
+        </aside>
+
+        <div class="lib-main">
+          <div class="toolbar">
+            <div class="search"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="m10.4 10.4 3.2 3.2"/></svg><input id="lib-search" placeholder="Pretraga – naziv, izvođač, key, BPM"></div>
+            <span class="count" id="lib-count"></span>
+            <div class="spacer"></div>
+            <button class="btn" id="btn-rescan">Osveži</button>
+            <button class="btn primary" id="btn-add-folder-2">Dodaj folder</button>
+          </div>
+          <div class="table lib-table" id="lib-table">
+            <div class="thead" id="lib-head"></div>
+            <div class="tbody" id="lib-body"><div class="vspace" id="lib-space"></div></div>
+            <div class="empty-state" id="lib-empty" hidden>
+              <div class="es-title">Biblioteka je prazna</div>
+              <div class="es-text">Dodaj folder sa masterima. Analiza (BPM, grid, key, fraze, cue) radi u pozadini, svaka pesma samo jednom.</div>
+              <button class="btn primary" id="btn-add-folder-3">Dodaj folder</button>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- SETTINGS -->
-  <section id="v-settings" class="view">
-    <div class="panel">
-      <h2>Podešavanja</h2>
-      <label>Folder za export (miksevi, rekordbox XML, DAW)<div class="row"><input id="st-export" /><button data-pick="st-export">…</button></div></label>
-      <label>SFX folder (sirene, efekti između pesama)<div class="row"><input id="st-sfx" /><button data-pick="st-sfx">…</button></div></label>
-      <label>Cue šablon
-        <select id="st-template"></select>
-      </label>
-      <p class="hint">Standard: A zeleno = mix in, B žuto = prvi drop/refren, C crveno = mix out + memory cue na svakoj frazi.<br>
-      Klub: + D narandžasto = drugi drop, E ljubičasto = break.</p>
-      <button id="st-save" class="primary">Sačuvaj</button>
-      <h3>Rekordbox – jednom podesi</h3>
-      <ol class="hint">
-        <li>Rekordbox → Preferences → Advanced → Database → <b>rekordbox xml</b> → Imported Library → izaberi <code id="st-xmlpath"></code></li>
-        <li>View → Layout → uključi <b>rekordbox xml</b> u levom meniju.</li>
-        <li>Posle svakog exporta: u levom meniju rekordbox xml → osveži → desni klik na set → <b>Import To Collection</b> / <b>Import Playlist</b>.</li>
-      </ol>
-      <h3 id="st-engine"></h3>
-    </div>
-  </section>
-</main>
+    <!-- ================= SETS ================= -->
+    <section class="view" id="v-sets">
+      <aside class="side sets-side">
+        <div class="side-group">
+          <div class="side-h">Setovi</div>
+          <button class="btn block" id="btn-new-set">+ Novi set</button>
+          <div id="set-list"></div>
+        </div>
+      </aside>
+      <div class="sets-main" id="sets-main"></div>
+    </section>
+  </main>
 
-<div id="toast"></div>
-<script src="/web/app.js"></script>
+  <footer class="transport" id="transport">
+    <div class="tp-now">
+      <div class="art sm" id="tp-art"></div>
+      <div class="tp-titles"><div class="tp-title" id="tp-title">—</div><div class="tp-sub" id="tp-sub"></div></div>
+    </div>
+    <div class="tp-ctrl">
+      <button class="icon-btn" id="tp-prev" title="Prethodno"><svg viewBox="0 0 20 20"><path d="M6 5v10M15 5l-7 5 7 5z" fill="currentColor" stroke="currentColor" stroke-width="1.2"/></svg></button>
+      <button class="play" id="tp-play" title="Play / pauza (Space)"><svg viewBox="0 0 20 20" id="tp-play-ico"><path d="M7 5l9 5-9 5z" fill="currentColor"/></svg></button>
+      <button class="icon-btn" id="tp-next" title="Sledeće"><svg viewBox="0 0 20 20"><path d="M14 5v10M5 5l7 5-7 5z" fill="currentColor" stroke="currentColor" stroke-width="1.2"/></svg></button>
+    </div>
+    <div class="tp-wave"><canvas id="tp-canvas"></canvas></div>
+    <div class="tp-time mono"><span id="tp-cur">0:00</span><i>/</i><span id="tp-dur">0:00</span></div>
+    <div class="tp-vol"><svg viewBox="0 0 20 20"><path d="M4 8h3l4-3v10l-4-3H4z" fill="currentColor"/><path d="M13.5 7.5a3.5 3.5 0 0 1 0 5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg><input type="range" id="tp-vol" min="0" max="1" step="0.01" value="0.9"></div>
+  </footer>
+</div>
+
+<div class="layer" id="layer"></div>
+<div class="toasts" id="toasts"></div>
+<script type="module" src="/web/js/main.js"></script>
 </body>
 </html>

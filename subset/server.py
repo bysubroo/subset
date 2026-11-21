@@ -15,11 +15,17 @@ from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .core import cues as cues_mod, export_rekordbox, harmonize, mixer, playlist
+from .core import artwork, cues as cues_mod, export_rekordbox, harmonize, mixer, playlist
 from .core.db import DB, data_dir
 from .core.library import Library
 
 log = logging.getLogger("subset")
+
+# Windows registry sometimes maps .js to text/plain, which breaks ES modules in WebView2
+import mimetypes
+for _ext, _type in ((".js", "application/javascript"), (".mjs", "application/javascript"), (".css", "text/css"),
+                    (".woff2", "font/woff2"), (".svg", "image/svg+xml")):
+    mimetypes.add_type(_type, _ext)
 WEB = Path(__file__).parent / "web"
 
 db = DB()
@@ -131,6 +137,17 @@ def audio_file(tid: int):
     return FileResponse(t["path"])
 
 
+@app.get("/api/art/{tid}")
+def art(tid: int):
+    t = db.track(tid, full=False)
+    if not t:
+        raise HTTPException(404)
+    p = artwork.get(tid, t["path"])
+    if not p:
+        return Response(status_code=204)
+    return FileResponse(p, headers={"Cache-Control": "max-age=86400"})
+
+
 @app.post("/api/pick_folder")
 def pick_folder():
     if picker["fn"] is None:
@@ -168,6 +185,15 @@ def put_settings(body: dict = Body(...)):
     save_settings(settings)
     lib.template = cues_mod.TEMPLATES.get(settings.get("cue_template"), cues_mod.DEFAULT_TEMPLATE)
     return settings
+
+
+@app.get("/api/sfx_file/{name}")
+def sfx_file(name: str):
+    d = settings.get("sfx_dir")
+    p = os.path.join(d or "", Path(name).name)
+    if not d or not os.path.exists(p):
+        raise HTTPException(404)
+    return FileResponse(p)
 
 
 @app.get("/api/sfx")
@@ -310,11 +336,15 @@ def preview_file(fn: str):
 def render(sid: int, body: dict = Body(...)):
     s = db.get_set(sid)
     fmt = body.get("format", "mp3")
+    bits = int(body.get("bits", 24))
     out = os.path.join(settings["export_dir"], safe_name(s["name"]) + "." + fmt)
 
     def fn(prog):
         pl = mixer.plan(s, _full_tracks(s))
-        mixer.render(pl, out, sfx_dir=settings.get("sfx_dir") or None, progress=prog)
+        mixer.render(pl, out, sfx_dir=settings.get("sfx_dir") or None, progress=prog, bits=bits)
+        if body.get("tracklist", True):
+            with open(os.path.splitext(out)[0] + " - tracklist.txt", "w", encoding="utf-8") as f:
+                f.write(mixer.tracklist(pl, "txt"))
         return {"path": out}
     return {"job": run_job("render", fn)}
 
@@ -360,6 +390,30 @@ def output_file(path: str):
     if not rp.startswith(os.path.realpath(settings["export_dir"])) or not os.path.exists(rp):
         raise HTTPException(404)
     return FileResponse(rp)
+
+
+@app.post("/api/sets/{sid}/export/playlist")
+def export_playlist(sid: int, body: dict = Body(...)):
+    s = db.get_set(sid)
+    fmt = body.get("format", "m3u8")
+    base = os.path.join(settings["export_dir"], safe_name(s["name"]))
+    ts = []
+    for it in s["items"]:
+        t = db.track(it["track_id"]) if it.get("track_id") else None
+        if t and t.get("analysis"):
+            t["analysis"].pop("waveform", None)
+            ts.append(t)
+    if fmt in ("m3u8", "m3u"):
+        path = base + "." + fmt
+        data = export_rekordbox.build_m3u8(ts)
+        with open(path, "w", encoding="utf-8" if fmt == "m3u8" else "cp1252", errors="replace") as f:
+            f.write(data)
+    else:
+        pl = mixer.plan(s, _full_tracks(s))
+        path = base + (" - tracklist.csv" if fmt == "csv" else " - tracklist.txt")
+        with open(path, "w", encoding="utf-8-sig" if fmt == "csv" else "utf-8", newline="") as f:
+            f.write(mixer.tracklist(pl, fmt))
+    return {"path": path, "folder": settings["export_dir"]}
 
 
 @app.get("/api/jobs/{jid}")

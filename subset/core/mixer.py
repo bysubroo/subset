@@ -13,10 +13,13 @@ RAMP_BARS = 8      # bars to glide back to native tempo after a synced transitio
 
 TRANSITION_TYPES = {
     "bass": "Bass swap",
-    "blend": "Blend (crossfade)",
-    "cut": "Cut",
+    "blend": "Crossfade",
+    "high_low": "High to low",
+    "low_high": "Low to high",
     "echo": "Echo out",
+    "cut": "Cut",
 }
+SYNCED_TYPES = ("bass", "blend", "high_low", "low_high")
 
 DEFAULT_SETTINGS = {
     "intro_mode": "short",   # full | short | skip
@@ -129,7 +132,7 @@ def plan(set_data: dict, tracks: dict[int, dict]) -> dict:
             r = tempo_ratio(pa["bpm"], a["bpm"])
             synced = abs(r - 1) <= SYNC_LIMIT
             warn = None
-            if not synced and ttype in ("bass", "blend"):
+            if not synced and ttype in SYNCED_TYPES:
                 ttype, warn = "echo", f"Razlika u tempu {abs(r - 1) * 100:.0f}% - prebaceno na Echo out"
             if ttype in ("cut", "echo"):
                 L_eff = 0
@@ -144,7 +147,7 @@ def plan(set_data: dict, tracks: dict[int, dict]) -> dict:
             prev["end_src"] = min(pa["duration"], a_out + (L_eff * a_bar if L_eff else (a_bar if ttype == "echo" else 0.0)))
             t_start = _src_to_time(prev, a_out)
             # incoming speed so its beats match A's actual tempo at the out point
-            sb = (s_a * r) if synced and ttype in ("bass", "blend") else 1.0
+            sb = (s_a * r) if synced and ttype in SYNCED_TYPES else 1.0
             if sb != 1.0:
                 ramp_start = e["in_src"] + L_eff * bar
                 e["speed_pts"] = [(e["in_src"], sb), (ramp_start, sb), (ramp_start + RAMP_BARS * bar, 1.0)]
@@ -226,7 +229,7 @@ def _ramp(n, kind="lin"):
 
 
 def render(pl: dict, out_path: str, sfx_dir: str | None = None, window: tuple[float, float] | None = None,
-           progress=None, raw: bool = False) -> str:
+           progress=None, raw: bool = False, bits: int = 24) -> str:
     entries, trans = pl["entries"], pl["transitions"]
     total = pl["total"] + 3.0
     w0, w1 = window if window else (0.0, total)
@@ -246,7 +249,7 @@ def render(pl: dict, out_path: str, sfx_dir: str | None = None, window: tuple[fl
         # incoming transition (this track = B)
         if tin:
             Ln = int((tin["t_end"] - tin["t_start"]) * SR)
-            if tin["type"] == "blend" and Ln > 0:
+            if tin["type"] in ("blend", "high_low", "low_high") and Ln > 0:
                 g = _ramp(Ln, "sin_in"); g_low[:Ln] *= g; g_high[:Ln] *= g
             elif tin["type"] == "bass" and Ln > 0:
                 g_high[:Ln] *= _ramp(Ln, "sin_in")
@@ -269,6 +272,13 @@ def render(pl: dict, out_path: str, sfx_dir: str | None = None, window: tuple[fl
                 f = min(441, Ln // 2)
                 g_low[m:m + f] *= _ramp(f)[::-1][: max(0, n - m)]
                 g_low[m + f:] = 0; g_high[s0 + Ln:] = 0
+            elif tout["type"] in ("high_low", "low_high") and Ln > 0:
+                # filter sweep on the outgoing track, volume holds then fades in the last quarter
+                q = Ln // 4
+                g = np.ones(Ln, np.float32)
+                g[Ln - q:] = _ramp(q, "cos_out")
+                g_low[s0:s0 + Ln] *= g[: max(0, n - s0)]; g_high[s0:s0 + Ln] *= g[: max(0, n - s0)]
+                g_low[s0 + Ln:] = 0; g_high[s0 + Ln:] = 0
             elif tout["type"] == "cut":
                 f = int(0.012 * SR)
                 g_low[s0:s0 + f] *= _ramp(f)[::-1][: max(0, n - s0)]; g_high[s0:s0 + f] *= _ramp(f)[::-1][: max(0, n - s0)]
@@ -278,6 +288,10 @@ def render(pl: dict, out_path: str, sfx_dir: str | None = None, window: tuple[fl
             y = lo * g_low[:, None] + hi * g_high[:, None]
         else:
             y = x * g_low[:, None]
+        if tout and tout["type"] in ("high_low", "low_high"):
+            s0 = int((tout["t_start"] - e["t_start"]) * SR)
+            Ln = int((tout["t_end"] - tout["t_start"]) * SR)
+            y = _filter_sweep(y, s0, Ln, tout["type"])
         if tout and tout["type"] == "echo":
             s0 = int((tout["t_start"] - e["t_start"]) * SR)
             y = _echo_out(y, s0, 60.0 / (e["bpm"] * (e["speed_pts"][-1][1] if e["speed_pts"] else 1)))
@@ -303,7 +317,31 @@ def render(pl: dict, out_path: str, sfx_dir: str | None = None, window: tuple[fl
         import soundfile as sf
         sf.write(out_path, np.clip(mix, -1, 1), SR, format="FLAC", subtype="PCM_24")
         return out_path
-    return _finish(mix, out_path)
+    return _finish(mix, out_path, bits)
+
+
+def _filter_sweep(y: np.ndarray, s0: int, n: int, kind: str) -> np.ndarray:
+    """Time-varying 2nd-order filter sweep over [s0, s0+n): high_low = low-pass 18k->180 Hz, low_high = high-pass 30->2k Hz."""
+    from scipy.signal import butter, sosfilt
+    if n <= 0:
+        return y
+    y = y.copy()
+    blk = 1024
+    zi = np.zeros((1, 2, 2))
+    for i in range(0, n, blk):
+        frac = i / n
+        if kind == "high_low":
+            fc = 18000 * (180 / 18000) ** frac
+            sos = butter(2, fc, "low", fs=SR, output="sos")
+        else:
+            fc = 30 * (2000 / 30) ** frac
+            sos = butter(2, fc, "high", fs=SR, output="sos")
+        a, b = s0 + i, min(s0 + i + blk, s0 + n, len(y))
+        if a >= b:
+            break
+        out, zi = sosfilt(sos, y[a:b], axis=0, zi=zi)
+        y[a:b] = out
+    return y
 
 
 def _echo_out(y: np.ndarray, s0: int, beat: float) -> np.ndarray:
@@ -322,7 +360,7 @@ def _echo_out(y: np.ndarray, s0: int, beat: float) -> np.ndarray:
     return out
 
 
-def _finish(mix: np.ndarray, out_path: str) -> str:
+def _finish(mix: np.ndarray, out_path: str, bits: int = 24) -> str:
     import pedalboard
     board = pedalboard.Pedalboard([pedalboard.Limiter(threshold_db=-1.0, release_ms=120)])
     y = board(mix.T.copy(), SR).T
@@ -338,7 +376,11 @@ def _finish(mix: np.ndarray, out_path: str) -> str:
             f.write(enc.encode(pcm)); f.write(enc.flush())
     else:
         import soundfile as sf
-        sf.write(out_path, y, SR, subtype="PCM_24")
+        fmt = "FLAC" if out_path.lower().endswith(".flac") else "WAV"
+        sub = {16: "PCM_16", 24: "PCM_24", 32: "FLOAT"}.get(bits, "PCM_24")
+        if fmt == "FLAC" and sub == "FLOAT":
+            sub = "PCM_24"
+        sf.write(out_path, y, SR, format=fmt, subtype=sub)
     return out_path
 
 
@@ -403,3 +445,21 @@ def render_transition_preview(pl: dict, idx: int, out_path: str, pre_bars: int =
     keep = {idx, idx + 1}
     ents = [e if e["idx"] in keep else {**e, "t_start": 1e9, "t_end": 1e9} for e in sub["entries"]]
     return render({**sub, "entries": ents}, out_path, sfx_dir=sfx_dir, window=(w0, w1))
+
+
+def tracklist(pl: dict, fmt: str = "txt") -> str:
+    """Tracklist with start times (YouTube / Mixcloud description, CSV for spreadsheets)."""
+    def ts(t):
+        t = int(round(t))
+        return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60:02d}:{t % 60:02d}"
+    rows = [(ts(e["t_start"]), e.get("artist") or "", e.get("title") or "", e.get("bpm"), e.get("camelot") or "") for e in pl["entries"]]
+    if fmt == "csv":
+        import csv
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["#", "Start", "Artist", "Title", "BPM", "Key"])
+        for i, r in enumerate(rows, 1):
+            w.writerow([i, *r])
+        return buf.getvalue()
+    return "\n".join(f"{r[0]} {r[1]} - {r[2]}".replace(" - ", " - ", 1).strip() for r in rows) + "\n"

@@ -1,0 +1,68 @@
+/* SubSet design tokens — graphite + SubRoo pink, Satoshi / IBM Plex Mono */
+@font-face { font-family: "Satoshi"; src: url("../fonts/Satoshi-Variable.woff2") format("woff2"); font-weight: 300 900; font-display: block; }
+@font-face { font-family: "Plex Mono"; src: url("../fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Plex Mono"; src: url("../fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: block; }
+@font-face { font-family: "Plex Mono"; src: url("../fonts/ibm-plex-mono-latin-ext-400-normal.woff2") format("woff2"); font-weight: 400; unicode-range: U+0100-024F; font-display: block; }
+
+:root {
+  /* surfaces */
+  --bg: #0E0F11;
+  --surface: #141619;
+  --surface-2: #1A1D21;
+  --surface-3: #22262B;
+  --wave-bg: #08090A;
+  --border: #24282E;
+  --border-strong: #31363D;
+
+  /* text */
+  --text: #E8EAED;
+  --text-2: #B4BAC3;
+  --muted: #8A9099;
+  --faint: #5B616B;
+
+  /* accent (SubRoo pink) — used sparingly */
+  --accent: #E04FD0;
+  --accent-hover: #EA6BDC;
+  --accent-press: #C93DB9;
+  --accent-weak: rgba(224, 79, 208, .13);
+  --accent-line: rgba(224, 79, 208, .55);
+  --on-accent: #16070F;
+
+  /* semantic */
+  --success: #3DD68C;
+  --warning: #F5A524;
+  --error: #F2555A;
+  --info: #4EA8FF;
+
+  /* waveform (rekordbox 3-band) */
+  --w-low: #2F6BFF;
+  --w-mid: #FF9F1C;
+  --w-high: #F2F2F2;
+
+  /* phrase colours */
+  --ph-intro: #3B6CF0;
+  --ph-verse: #19A97B;
+  --ph-build: #E8812A;
+  --ph-drop: #E2475B;
+  --ph-chorus: #C95AD8;
+  --ph-break: #7B61FF;
+  --ph-outro: #3B6CF0;
+
+  /* type */
+  --font: "Satoshi", "Segoe UI", system-ui, sans-serif;
+  --mono: "Plex Mono", ui-monospace, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-s: 12px;
+  --fs-m: 13px;
+  --fs-l: 15px;
+  --fs-xl: 18px;
+
+  /* geometry */
+  --r-xs: 3px;
+  --r-s: 4px;
+  --r-m: 6px;
+  --row: 32px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: 120ms;
+  --t-med: 180ms;
+}
